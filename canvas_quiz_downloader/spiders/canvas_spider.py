@@ -12,7 +12,7 @@ class CanvasSpider(scrapy.Spider):
 
     start_urls = ['https://modesto.instructure.com/courses']
 
-    base_url = 'https://modesto.instructure.com/' # Used to append with extension urls for a full link
+    base_url = 'https://modesto.instructure.com/'   # Used to append with extension urls for a full link
 
     login_url = "https://modesto.instructure.com/login/canvas"
     login_user = '***'
@@ -55,6 +55,7 @@ class CanvasSpider(scrapy.Spider):
                 # Splits the course id into their respective components
                 course_term, course_name, course_level, course_section = course.split('-')
 
+
                 # Instantiates a course item as seen in items.py
                 item = CourseItem()
                 item['course_term'] = course_term
@@ -62,6 +63,8 @@ class CanvasSpider(scrapy.Spider):
                 item['course_level'] = course_level
                 item['course_section'] = course_section
                 item['course_link'] = course_url_extension
+
+                FUCK
 
                 # Sends a Request to the current course link with an item object
                 nav_links = scrapy.Request(url=course_link, callback=self.parse_navlinks)
