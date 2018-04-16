@@ -16,18 +16,9 @@ class CourseItem(scrapy.Item):
     course_level = scrapy.Field()
     course_section = scrapy.Field()
 
-    # Course and nav links are the extension url only.
+    # Course and nav links are extension urls only.cour
     course_link = scrapy.Field()   # The link to a student's course
     nav_links = scrapy.Field()      # List of navigational links from each course page
-
-    # Quiz questions and answers
-    quiz_question = scrapy.Field()
-    quiz_question_image = scrapy.Field()
-    quiz_answer = scrapy.Field()
-    quiz_answer_image = scrapy.Field()
-
-    user_points = scrapy.Field()
-    question_points = scrapy.Field()
 
     pass
 
@@ -40,11 +31,20 @@ class QuizItem(scrapy.Item):
 
 
 class QuestionItem(scrapy.Item):
+    course_name = scrapy.Field()
+    quiz_name = scrapy.Field()
+
     quiz_question = scrapy.Field()
     quiz_question_image = scrapy.Field()
     quiz_answer = scrapy.Field()
     quiz_answer_image = scrapy.Field()
+    quiz_wrong = scrapy.Field()
+    pass
 
-    user_points = scrapy.Field()
-    question_points = scrapy.Field()
+
+class AllItem(scrapy.Item):
+    course_item = scrapy.Field()
+    quiz_item = scrapy.Field()
+    qanda_item = scrapy.Field()
+
     pass

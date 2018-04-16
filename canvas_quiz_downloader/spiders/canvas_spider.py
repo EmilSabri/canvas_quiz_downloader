@@ -3,8 +3,10 @@ import logging
 from canvas_quiz_downloader.items import CourseItem
 from canvas_quiz_downloader.items import QuizItem
 from canvas_quiz_downloader.items import QuestionItem
+from canvas_quiz_downloader.items import AllItem
 
 from loginform import fill_login_form
+import json
 
 
 class CanvasSpider(scrapy.Spider):
@@ -55,21 +57,22 @@ class CanvasSpider(scrapy.Spider):
                 # Splits the course id into their respective components
                 course_term, course_name, course_level, course_section = course.split('-')
 
+                # Choose which class you want to test
+                # Distinguish the section number if there are multiple course names that are the same
+                course_filter = ['MCSCI', 'MANTHR', 'MPHILO', 'MENSCI', 'MART', 'MECON', 'MENGL', 'MCHEM']
+                if course_filter[6] == course_name:
+                    # Instantiates a course item as seen in items.py
+                    course_item = CourseItem()
+                    course_item['course_term'] = course_term
+                    course_item['course_name'] = course_name
+                    course_item['course_level'] = course_level
+                    course_item['course_section'] = course_section
+                    course_item['course_link'] = course_url_extension
 
-                # Instantiates a course item as seen in items.py
-                item = CourseItem()
-                item['course_term'] = course_term
-                item['course_name'] = course_name
-                item['course_level'] = course_level
-                item['course_section'] = course_section
-                item['course_link'] = course_url_extension
-
-                FUCK
-
-                # Sends a Request to the current course link with an item object
-                nav_links = scrapy.Request(url=course_link, callback=self.parse_navlinks)
-                nav_links.meta['item'] = item
-                yield nav_links
+                    # Sends a Request to the current course link with an item object
+                    nav_links = scrapy.Request(url=course_link, callback=self.parse_navlinks)
+                    nav_links.meta['course_item'] = course_item
+                    yield nav_links
 
     # General Course Parse Logic
     """
@@ -83,9 +86,9 @@ class CanvasSpider(scrapy.Spider):
 
     # Grabs the navigational links on each course.
     # Filters out links that are in a list.
-    # Sends the filtered nav links to be searched for for questions
+    # Sends the filtered nav links to be searched for their questions
     def parse_navlinks(self, response):
-        item = response.meta['item']
+        course_item = response.meta['course_item']
         filters = ['announcements', 'discussion', 'modules', 'quizzes', 'external_tools', 'files', 'wiki',
                    'collaborations']
         nav_links = response.css('div.ic-app-course-menu').css('li.section').css('a::attr(href)').extract()
@@ -93,12 +96,13 @@ class CanvasSpider(scrapy.Spider):
 
         # Filters out certain links
         for nav_link in nav_links:
-            if nav_link == item['course_link']:
+            if nav_link == course_item['course_link']:
                 continue
-            if nav_link == (item['course_link'] + '/assignments'):
+            if nav_link == (course_item['course_link'] + '/assignments'):
                 continue
 
-            flag = False    # Appends nav_link to nav_links_filtered when False
+            # Appends nav_link to nav_links_filtered when False
+            flag = False
             for i in filters:
                 if i in nav_link:
                     flag = True
@@ -107,56 +111,74 @@ class CanvasSpider(scrapy.Spider):
             if not flag:
                 nav_links_filtered.append(nav_link)
 
-        item['nav_links'] = nav_links_filtered
+        course_item['nav_links'] = nav_links_filtered
 
-        for link in item['nav_links']:
-            full_link = self.base_url + link[1:]
-            yield scrapy.Request(url=full_link, callback=self.parse_quiz_links, meta={'item': item})
+        if course_item['nav_links']:
+            for link in course_item['nav_links']:
+                full_link = self.base_url + link[1:]
+                yield scrapy.Request(url=full_link, callback=self.parse_quiz_links, meta={'course_item': course_item})
+        else:
+            return course_item
 
     # Gathers the potential quiz names and their links.
     # Sends them off to be validated if they actually are quizzes.
     def parse_quiz_links(self, response):
-        item = response.meta['item']
-        quiz_names = []
-        quiz_links = []
+        course_item = response.meta['course_item']
+        qanda_item = QuestionItem()
+        quiz_item = QuizItem()
 
         # Check the type of link and whichever one is not empty search their elements
-        grades = response.css('div#assignments').css('th.title').css('a')
-        assign_sylla = response.css('div#assignment_panel').css('li')
-        if grades:
-            for quiz in grades:
+        grades_page = response.css('div#assignments').css('th.title').css('a')
+        assignsylla_page = response.css('div#assignment_panel').css('li')
+        if grades_page:
+            for quiz in grades_page:
+                # Grabs the name and link of the potential quiz.
+                # Right now the link could either be a dud or a juicy quiz.
                 name = quiz.css('a::text').extract_first()
                 link = quiz.css('a::attr(href)').extract_first()
-                quiz_names.append(name)
-                quiz_links.append(link)
+                # quiz_names.append(name)
+                # quiz_links.append(link)
                 link = self.base_url + link[1:]
-                item['quiz_name'] = name
-                item['quiz_link'] = link
-                yield scrapy.Request(url=link, callback=self.check_quiz_validity, meta={'item': item})
-        elif assign_sylla:
-            for quiz in assign_sylla[1:]:
-                name = quiz.css('a::text').extract_first()
-                link = quiz.css('a::attr(href)').extract_first()
-                quiz_names.append(name)
-                quiz_links.append(link)
-                link = self.base_url + link[1:]
-                item['quiz_name'] = name
-                item['quiz_link'] = link
-                yield scrapy.Request(url=link, callback=self.check_quiz_validity, meta={'item': item})
-        yield item
+                quiz_item['quiz_name'] = name
+                quiz_item['quiz_link'] = link
+                qanda_item['quiz_name'] = name
+                # all_item['course_item'] = course_item['nav_links']
+                # all_item['quiz_item'] = quiz_item
+                # yield all_item
+                yield scrapy.Request(url=link, callback=self.check_quiz_validity, meta={'quiz_item': quiz_item})
 
-    """
-        1. Check for div.user_content
-            1a. If NOT then look for iframe#preview_frame and Request url
-            1b. If YES then look for questions and answers
-        2 Questions will be in 'div.user_content::text'.extract()
-    """
-"""
+        elif assignsylla_page:
+            # The first element on an assignment page is useless hence the splice [1:]
+            for quiz in assignsylla_page[1:]:
+                name = quiz.css('a::text').extract_first()
+                link = quiz.css('a::attr(href)').extract_first()
+                # quiz_names.append(name)
+                # quiz_links.append(link)
+                link = self.base_url + link[1:]
+                quiz_item['quiz_name'] = name
+                quiz_item['quiz_link'] = link
+                qanda_item['quiz_name'] = name
+                # all_item['course_item'] = course_item['nav_links']
+                # all_item['quiz_item'] = quiz_item
+                # yield all_item
+                yield scrapy.Request(url=link, callback=self.check_quiz_validity, meta={'quiz_item': quiz_item})
+        else:
+            #yield all_item
+            return quiz_item
+
+    # Check if the page has the element that identifies as a quiz
+    # If not then check for the iframe and recall check_quiz_validity
+    # If it doesn't have it all, then return none
     def check_quiz_validity(self, response):
-        item = response.meta['item']
+        quiz_item = response.meta['quiz_item']
+        qanda_item = QuestionItem()
+
+        all_item = AllItem()
+        all_item['quiz_item'] = quiz_item
 
         quiz = response.css('div.text')
-        answers = quiz.css('div.answer')
+        points = response.css('div.header')
+        #answers = quiz.css('div.answer')
         iframe = response.css('iframe#preview_frame').xpath('@src').extract_first()
 
         question_list = []
@@ -165,76 +187,50 @@ class CanvasSpider(scrapy.Spider):
         # If there are quiz questions, then extract them and their answers.
         # If there is an iframe, meaning no quiz questions, then go to the iframe's link with callback to this function.
         # If there is neither quiz questions and an iframe, then return 'None'
-        if quiz and answers:
-            for i in quiz:
-                # Code for when "Answers will be shown after your last attempt"
-                # Check for point on each question
-                answers_hidden = response.css('div.alert')
-                if answers_hidden:
-                    user_points = response.css('div.header').css('div.user_points::text').extract_first()
-                    question_points = response.css('div.header').css('span.question_points::text').extract_first()
-                    item['user_points'] = user_points
-                    item['question_points'] = question_points
-                    if user_points == question_points:
-                        question = i.css('div.user_content::text').extract_first()
-                        answer = i.css('div.selected_answer').css('div.answer_match_left::text').extract_first()
-                        question_list.append(question)
-                        answer_list.append(answer)
-                        continue
-
+        if quiz:
+            # ans will be the counter since there are an equal number of quiz questions with their points.
+            for ans_i, problem in enumerate(quiz):
+                # Question scraping logic
                 # Add more question types
                 # 1. Multiple elements per question
                 # 2. Question and image
                 # 3. Multiple images
                 # 4. Question and multiple images per question
-                #question = i.css('div.user_content').extract_first()
-                question = i.css('div.user_content').css('p::text').extract_first()
 
+                question = problem.css('div.user_content').css('p::text').extract_first()
 
+                user_points = points[ans_i].css('div.user_points::text').extract_first()
+                user_points = int(user_points.split('\n')[1])  # Finds the int in the string
 
-                answer = i.css('div.correct_answer').css('div.answer_match_left::text').extract_first()
+                question_points = points[ans_i].css('span.question_points::text').extract_first()
+                question_points = int(question_points.split('/')[1])  # Finds the int in the string
 
-                # Indicate that this is the wrong answer. "Answer hasn't been submitted yet :("
-                if not answer:
-                    answer = i.css('div.wrong_answer').css('div.answer_match_left::text')
+                if user_points == question_points:
+                    # Answer is correct here
+                    # Include answer_match_left_html for image answers
+                    answer = problem.css('div.selected_answer').css('div.answer_match_left::text').extract_first()
+
+                else:
+                    # Wrong answer
+                    answer = problem.css('div.correct_answer').css('div.answer_match_left::text').extract_first()
+
+                    if not answer:
+                        answer = problem.css('div.selected_answer').css('div.answer_match_left::text').extract_first()
+                        answer = answer + 'WRONG'
 
                 question_list.append(question)
                 answer_list.append(answer)
 
-            item['quiz_questions'] = question_list
-            item['quiz_answers'] = answer_list
-            yield item
+            quiz_name = response.css('div.ic-app-nav-toggle-and-crumbs').css('span.ellipsible::text').extract()
+            qanda_item['course_name'] = quiz_name[2]
+            qanda_item['quiz_name'] = quiz_name[4]
+            qanda_item['quiz_question'] = question_list
+            qanda_item['quiz_answer'] = answer_list
+            yield qanda_item
         elif iframe:
             link = self.base_url + iframe[1:]
-            yield scrapy.Request(url=link, callback=self.check_quiz_validity, meta={'item': item})
+            yield scrapy.Request(url=link, callback=self.check_quiz_validity,
+                                 meta={'quiz_item': quiz_item})
 
         else:
-            item['quiz_questions'] = ['None']
-            item['quiz_answers'] = ['None']
-            yield item
-"""
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+            return qanda_item
