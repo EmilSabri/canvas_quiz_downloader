@@ -114,9 +114,11 @@ class CanvasSpider(scrapy.Spider):
         course_item['nav_links'] = nav_links_filtered
 
         if course_item['nav_links']:
-            for link in course_item['nav_links']:
-                full_link = self.base_url + link[1:]
-                yield scrapy.Request(url=full_link, callback=self.parse_quiz_links, meta={'course_item': course_item})
+            # Stops going to two different links with the same content .
+            # Assumes that every course will have a /grades or /assignment/syllabus page
+            link = course_item['nav_links'][0]
+            full_link = self.base_url + link[1:]
+            yield scrapy.Request(url=full_link, callback=self.parse_quiz_links, meta={'course_item': course_item})
         else:
             return course_item
 
@@ -197,7 +199,8 @@ class CanvasSpider(scrapy.Spider):
                 # 3. Multiple images
                 # 4. Question and multiple images per question
 
-                question = problem.css('div.user_content').css('p::text').extract_first()
+                #question = problem.css('div.user_content').css('p::text').extract_first()
+                question = problem.css('div.user_content').xpath('.//p/text()').extract_first()
 
                 user_points = points[ans_i].css('div.user_points::text').extract_first()
                 user_points = int(user_points.split('\n')[1])  # Finds the int in the string
@@ -227,6 +230,7 @@ class CanvasSpider(scrapy.Spider):
             qanda_item['quiz_question'] = question_list
             qanda_item['quiz_answer'] = answer_list
             yield qanda_item
+
         elif iframe:
             link = self.base_url + iframe[1:]
             yield scrapy.Request(url=link, callback=self.check_quiz_validity,
