@@ -6,8 +6,7 @@ from canvas_quiz_downloader.items import QuestionItem
 from canvas_quiz_downloader.items import AllItem
 
 from loginform import fill_login_form
-import json
-
+import html2text
 
 class CanvasSpider(scrapy.Spider):
     name = "canvas"
@@ -180,18 +179,22 @@ class CanvasSpider(scrapy.Spider):
 
         quiz = response.css('div.text')
         points = response.css('div.header')
-        #answers = quiz.css('div.answer')
+        question_types = response.css('span.question_type::text').extract()
+
         iframe = response.css('iframe#preview_frame').xpath('@src').extract_first()
 
+        user_points_list = []
+        question_points_list = []
         question_list = []
         answer_list = []
+
 
         # If there are quiz questions, then extract them and their answers.
         # If there is an iframe, meaning no quiz questions, then go to the iframe's link with callback to this function.
         # If there is neither quiz questions and an iframe, then return 'None'
         if quiz:
             # ans will be the counter since there are an equal number of quiz questions with their points.
-            for ans_i, problem in enumerate(quiz):
+            for i, problem in enumerate(quiz):
                 # Question scraping logic
                 # Add more question types
                 # 1. Multiple elements per question
@@ -199,38 +202,75 @@ class CanvasSpider(scrapy.Spider):
                 # 3. Multiple images
                 # 4. Question and multiple images per question
 
-                #question = problem.css('div.user_content').css('p::text').extract_first()
-                question = problem.css('div.user_content').xpath('.//p/text()').extract_first()
+                question = problem.css('div.user_content').css('p').extract_first()
+                # The converter allows us to choose our rules on our html string, question.
+                # ignore_empahsis is for ignoring stylistic html elements.
+                converter = html2text.HTML2Text()
+                converter.ignore_emphasis = True
+                question = converter.handle(question)
+                # Removes any unnecessary text like '   ' or ' \n ' .
+                question = question.strip()
 
-                user_points = points[ans_i].css('div.user_points::text').extract_first()
+                user_points = points[i].css('div.user_points::text').extract_first()
                 user_points = int(user_points.split('\n')[1])  # Finds the int in the string
 
-                question_points = points[ans_i].css('span.question_points::text').extract_first()
+                question_points = points[i].css('span.question_points::text').extract_first()
                 question_points = int(question_points.split('/')[1])  # Finds the int in the string
 
-                if user_points == question_points:
-                    # Answer is correct here
-                    # Include answer_match_left_html for image answers
-                    answer = problem.css('div.selected_answer').css('div.answer_match_left::text').extract_first()
-
-                else:
-                    # Wrong answer
-                    answer = problem.css('div.correct_answer').css('div.answer_match_left::text').extract_first()
-
-                    if not answer:
+                # <span class="question_type"> multiple_choice_question</span>
+                # <span class="question_type">matching_question</span>
+                question_type = question_types[i]
+                if question_type == 'multiple_choice_question':
+                    if user_points == question_points:
+                        # Answer is correct here
+                        # Include answer_match_left_html for image answers
                         answer = problem.css('div.selected_answer').css('div.answer_match_left::text').extract_first()
-                        answer = answer + 'WRONG'
 
+                    else:
+                        # Wrong answer
+                        answer = problem.css('div.correct_answer').css('div.answer_match_left::text').extract_first()
+
+                        if not answer:
+                            answer = problem.css('div.selected_answer').css('div.answer_match_left::text').extract_first()
+                elif question_type == 'matching_question':
+                    # Answers will be a list of tuples.
+                    # Tuples will be the left and right side (left, right)
+                    # sides_list contains the questions and answers for the matching sides
+                    answer = []
+                    sides_list = problem.css('div.answer')
+                    for i in sides_list:
+                        side_left = i.css('div.answer_match_left::text').extract_first()
+                        side_right = i.css('select.question_input').css('option::text').extract_first()
+                        match = (side_left, side_right)
+                        answer.append(match)
+
+                # Similar to the multiple choice question type
+                elif question_type == 'true_false_question':
+                    if user_points == question_points:
+                        # Answer is correct here
+                        # Include answer_match_left_html for image answers
+                        answer = problem.css('div.selected_answer').css('div.answer_match_left::text').extract_first()
+
+                    else:
+                        # Wrong answer
+                        answer = problem.css('div.correct_answer').css('div.answer_match_left::text').extract_first()
+
+                        if not answer:
+                            answer = problem.css('div.selected_answer').css('div.answer_match_left::text').extract_first()
+
+                user_points_list.append(user_points)
+                question_points_list.append(question_points)
                 question_list.append(question)
                 answer_list.append(answer)
 
             quiz_name = response.css('div.ic-app-nav-toggle-and-crumbs').css('span.ellipsible::text').extract()
             qanda_item['course_name'] = quiz_name[2]
             qanda_item['quiz_name'] = quiz_name[4]
+            qanda_item['quiz_user_points'] = user_points_list
+            qanda_item['quiz_question_points'] = question_points_list
             qanda_item['quiz_question'] = question_list
             qanda_item['quiz_answer'] = answer_list
             yield qanda_item
-
         elif iframe:
             link = self.base_url + iframe[1:]
             yield scrapy.Request(url=link, callback=self.check_quiz_validity,
